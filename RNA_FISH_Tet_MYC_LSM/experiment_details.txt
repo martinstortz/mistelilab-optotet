@@ -1,0 +1,10 @@
+RPE_MYC_TetR-CRY2 clone E7
+
+Dark vs Light 4h
+
+RNA FISH MYC-exon-Atto647
+
+ch1 dapi
+ch2 mcherry
+ch3 GFP
+ch4 atto647

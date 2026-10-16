@@ -1,0 +1,9 @@
+experiment_name,ch3_proximity,activity_status,n_cells,mean_ch1_intensity_active,median_ch1_intensity_active,total_cells,fraction
+E7_Dark,Distal,Active,12,1150.0576588620497,807.7285639667238,63,0.19047619047619047
+E7_Dark,Distal,Inactive,51,NA,NA,63,0.8095238095238095
+E7_Dark,Proximal,Active,10,1874.875085228033,1356.178178800317,43,0.23255813953488372
+E7_Dark,Proximal,Inactive,33,NA,NA,43,0.7674418604651163
+E7_Light,Distal,Active,1,1140.1411915802687,1140.1411915802687,16,0.0625
+E7_Light,Distal,Inactive,15,NA,NA,16,0.9375
+E7_Light,Proximal,Active,20,1925.5439709641316,1102.4936541125815,85,0.23529411764705882
+E7_Light,Proximal,Inactive,65,NA,NA,85,0.7647058823529411

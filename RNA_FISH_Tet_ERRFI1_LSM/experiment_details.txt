@@ -1,0 +1,10 @@
+RPE_ERRFI1_TetR-CRY2 clone B6C7
+
+Dark vs Light 4h
+
+RNA FISH ERRFI1-Atto647
+
+ch1 dapi
+ch2 mcherry
+ch3 GFP
+ch4 atto647

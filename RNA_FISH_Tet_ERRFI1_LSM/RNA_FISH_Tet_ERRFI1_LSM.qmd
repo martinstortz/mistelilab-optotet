@@ -1,0 +1,325 @@
+---
+title: "Single-allele analysis of Tet spot distance & RNA signal"
+output: html_document
+---
+
+```{r}
+#| label: load-packages
+#| include: false
+#| warning: false
+
+library(dplyr)
+library(tidyverse)
+library(fs)
+library(data.table)
+library(ggthemes)
+library(SpatialTools)
+library(knitr)
+library(purrr)
+```
+
+---
+
+### Input parameters
+
+```{r input-variables}
+GLOB_C <- "*nuclei_information_well*" 
+GLOB_S <- "*spots_locations_well*" 
+XY_RES <- 0.066 # Pixel size (um)
+THRESHOLD1_CH2_CH3 <- 0.18  # 5'-3' distance threshold (um) to define proximal vs distal 5'-3' boundaries
+THRESHOLD2_CH2_CH3 <- 0.6  # 5'-3' distance threshold (um) to define alleles that have no 3'boundary spots
+THRESHOLD3_CH3_CH1 <- 0.8 # 5'-RNA distance threshold (um) to define alleles as active vs inactive
+THRESHOLD4_CH1_INT <- 300 # Intensity threshold for RNA spots
+```
+
+---
+
+### Download data in data folder if needed
+
+```{r}
+#| label: download
+```
+
+---
+
+### Read cell data
+
+```{r}
+#| label: read-cells
+
+pathsC <- dir_info("data/ch1k7_ch2k5_ch3k5",
+                  recurse = TRUE,
+                  glob = GLOB_C) %>%
+  pull(path)
+
+cell_tbl <- map_dfr(pathsC, \(p) {
+  fread(p, select = c("Experiment", "cell_index")) %>%
+    mutate(file_name = as.character(p), .before = 1)
+}) %>%
+  select(file_name, Experiment, cell_index)
+```
+
+---
+
+### Read spot data 
+
+```{r}
+#| label: read-spots
+
+pathsS <- dir_info("data/ch1k7_ch2k5_ch3k5",
+                  recurse = TRUE,
+                  glob = GLOB_S) %>%
+  pull(path)
+
+spots_tbl <- map_dfr(pathsS, \(p) {
+  fread(
+    p,
+    select = c("Experiment", "channel", "cell_index",
+               "V1", "x_location", "y_location", "integrated_intensity")
+  ) %>%
+    filter(cell_index != 0) %>%
+    transmute(
+      file_name = as.character(p),
+      Experiment,
+      channel,
+      spot_index = V1,
+      x = x_location * XY_RES,
+      y = y_location * XY_RES,
+      cell_index,
+      integrated_intensity
+    )
+})
+
+###Add 3'boundary (channel 2) spot data from other folders inside data directory
+base_dir   <- file.path("data", "ch1k7_ch2k5_ch3k5")
+other_dirs <- dir_info("data", type = "directory") %>%
+  pull(path) %>%
+  setdiff(base_dir)
+
+new_ch2_spots <- map_dfr(other_dirs, \(dir_path) {
+
+  paths <- dir_info(dir_path, recurse = TRUE, glob = GLOB_S) %>%
+    pull(path)
+
+  map_dfr(paths, \(p) {
+    fread(
+      p,
+      select = c("Experiment", "channel", "V1",
+                 "x_location", "y_location", "cell_index",
+                 "integrated_intensity")
+    ) %>%
+      filter(channel == 2, cell_index != 0) %>%
+      transmute(
+        file_name = as.character(p),
+        Experiment,
+        channel,
+        spot_index = V1,
+        x = x_location * XY_RES,
+        y = y_location * XY_RES,
+        cell_index,
+        integrated_intensity
+      )
+  })
+})
+
+spots_tbl <- bind_rows(spots_tbl, new_ch2_spots)
+```
+
+---
+
+### Calculate spot number per cell
+
+```{r}
+#| label: calc-n-spots
+
+cell_n_spots_tbl <- spots_tbl %>%
+  group_by(Experiment, cell_index, channel) %>%
+  count() %>%
+  pivot_wider(names_from = channel,
+              names_prefix = "n_spots_channel_",
+              values_from = n,
+              values_fill = 0) %>%
+  ungroup()
+```
+
+---
+
+### Filter cells according to spot number per cell
+
+```{r}
+#| label: filter-cells
+
+spot_filt_criterion <- quote(n_spots_channel_3 >= 1 & n_spots_channel_2 >= 1)
+
+cell_n_spots_filt_tbl <- cell_n_spots_tbl %>%
+  semi_join(cell_tbl, by = c("Experiment","cell_index")) %>%
+  filter(!!spot_filt_criterion)
+```
+
+---
+
+### Filter spots for filtered cells
+
+```{r}
+#| label: filter-spots
+
+spot_filt_tbl <- spots_tbl %>% 
+  semi_join(cell_n_spots_filt_tbl, 
+            by = c("Experiment", "cell_index")) %>%
+  as.data.table()
+```
+
+---
+
+### Calculate minimum 5'-3' boundary spot distances
+
+```{r}
+#| label: ch3-spot-selection
+
+# Get the highest intensity 5'boundary spot (channel 3) per cell
+ch3_spots_selected <- spot_filt_tbl %>%
+  filter(channel == 3) %>%
+  group_by(Experiment, cell_index) %>%
+  slice_max(integrated_intensity, n = 1, with_ties = FALSE) %>%
+  ungroup() %>%
+  select(Experiment, cell_index, ch3_x = x, ch3_y = y, ch3_intensity = integrated_intensity)
+
+ch2_spots <- spot_filt_tbl %>%
+  filter(channel == 2) %>%
+  select(Experiment, cell_index, spot_index, ch2_x = x, ch2_y = y, ch2_intensity = integrated_intensity)
+
+# Calculate distance between 5' spot and all 3' spots in the same cell
+ch2_ch3_distances <- ch3_spots_selected %>%
+  left_join(ch2_spots, 
+            by = c("Experiment", "cell_index"),
+            relationship = "many-to-many") %>%
+  mutate(ch2_ch3_distance = sqrt((ch2_x - ch3_x)^2 + (ch2_y - ch3_y)^2))
+
+# Get the closest 3' spot for each 5' spot
+ch2_ch3_closest <- ch2_ch3_distances %>%
+  group_by(Experiment, cell_index) %>%
+  slice_min(ch2_ch3_distance, n = 1, with_ties = FALSE) %>%
+  ungroup() %>%
+  select(Experiment, cell_index, closest_ch2_spot = spot_index, 
+         ch2_ch3_distance, ch2_x, ch2_y, ch2_intensity, ch3_x, ch3_y, ch3_intensity)
+```
+
+---
+
+### Classify cells based on 5'-3' boundary distance
+
+```{r}
+#| label: classify-ch2-ch3
+
+ch2_ch3_classified <- ch2_ch3_closest %>%
+  mutate(ch3_proximity = case_when(
+    ch2_ch3_distance < THRESHOLD1_CH2_CH3 ~ "Proximal",
+    ch2_ch3_distance >= THRESHOLD1_CH2_CH3 & ch2_ch3_distance < THRESHOLD2_CH2_CH3 ~ "Distal",
+    ch2_ch3_distance >= THRESHOLD2_CH2_CH3 ~ "No 3' spot",
+    TRUE ~ NA_character_
+  ))
+```
+
+---
+
+### Calculate 5'boundary-RNA spot distance and classify alleles by activity status
+
+```{r}
+#| label: classify-ch3-ch1
+
+# Get RNA spots
+ch1_spots <- spot_filt_tbl %>%
+  filter(channel == 1) %>%
+  select(Experiment, cell_index, ch1_spot_index = spot_index, ch1_x = x, ch1_y = y, ch1_intensity = integrated_intensity)
+
+# Calculate distance between 5'boundary spot and all RNA spots in the same cell
+ch3_ch1_distances <- ch2_ch3_classified %>%
+  left_join(ch1_spots, 
+            by = c("Experiment", "cell_index"),
+            relationship = "many-to-many") %>%
+  mutate(ch3_ch1_distance = sqrt((ch3_x - ch1_x)^2 + (ch3_y - ch1_y)^2))
+
+# Get the closest RNA spot for each 5' spot
+ch3_ch1_closest <- ch3_ch1_distances %>%
+  group_by(Experiment, cell_index) %>%
+  slice_min(ch3_ch1_distance, n = 1, with_ties = FALSE) %>%
+  ungroup()
+
+# Classify alleles as Active/Inactive
+spots_classified <- ch2_ch3_classified %>%
+  left_join(
+    ch3_ch1_closest %>% 
+      select(Experiment, cell_index,
+             closest_ch1_spot = ch1_spot_index, ch3_ch1_distance, 
+             ch1_x, ch1_y, ch1_intensity),
+    by = c("Experiment", "cell_index")
+  ) %>%
+  mutate(
+    # Replace ch1_int with NA when ch1_int is too low or ch1 spot is too far
+   ch1_intensity = if_else(
+      ch1_intensity < THRESHOLD4_CH1_INT | ch3_ch1_distance > THRESHOLD3_CH3_CH1,
+      NA_real_,
+      ch1_intensity
+    ),
+    # Classify using the updated ch1_intensity
+    activity_status = case_when(
+  !is.na(ch1_intensity) ~ "Active",
+  TRUE ~ "Inactive"
+    )
+  )
+
+# Extract experiment name
+spots_classified <- spots_classified %>%
+  mutate(experiment_name = str_remove(Experiment, "_\\d+\\.czi$"))
+# Filter out cells with "No 3' spot" classification
+spots_classified <- spots_classified %>%
+  filter(ch3_proximity != "No 3' spot")
+
+# Save table with individual spot information
+write_csv(spots_classified, "individual_allele_data.csv")
+```
+
+---
+
+### Calculate fraction of active/inactive alleles according to 5'-3' proximity status
+
+```{r}
+#| label: proximity-activity-analysis
+
+proximity_activity_summary <- spots_classified %>%
+  group_by(experiment_name, ch3_proximity, activity_status) %>%
+  summarise(
+    n_cells = n(),
+    mean_ch1_intensity_active = if_else(
+      first(activity_status) == "Active",
+      mean(ch1_intensity, na.rm = TRUE),
+      NA_real_
+    ),
+    median_ch1_intensity_active = if_else(
+      first(activity_status) == "Active",
+      median(ch1_intensity, na.rm = TRUE),
+      NA_real_
+    ),
+    .groups = "drop"
+  ) %>%
+  group_by(experiment_name, ch3_proximity) %>%
+  mutate(
+    total_cells = sum(n_cells),
+    fraction = n_cells / total_cells
+  ) %>%
+  ungroup()
+
+# Save to CSV file
+write_csv(proximity_activity_summary, "proximity_activity_summary.csv")
+```
+
+---
+
+### Session info
+
+```{r}
+#| label: session-info
+#| results: markup
+
+sessionInfo()
+```
