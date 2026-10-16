@@ -1,7 +1,7 @@
 # mistelilab-optotet
 
 GENERAL INFORMATION
-This is a repository containing the R code used to analyze the data and generate the results included in a bioRxiv preprint from the Misteli lab at the National Cancer Institute/NIH. In this manuscript, the authors develop an optogenetic method to manipulate 3D genome organizacion named 'OptoTet' based on the fusion of Tet repressors and CRY2 proteins, and they demonstrate a functiona role of topologically associating domains (TADs) in gene transcription.
+This is a repository containing the R code used to analyze the data and generate the results included in a bioRxiv preprint from the Misteli lab at the National Cancer Institute/NIH. In this manuscript, the authors develop an optogenetic method to manipulate 3D genome organization named 'OptoTet' based on the fusion of Tet repressors and CRY2 proteins, and they demonstrate a functional role of topologically associating domains (TADs) in gene transcription.
 
 TITLE
 Optogenetic induction of TAD boundary pairing promotes gene activity
