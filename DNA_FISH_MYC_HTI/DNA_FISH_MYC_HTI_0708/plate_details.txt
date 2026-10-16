@@ -1,0 +1,19 @@
+RPE_MYC_TetR-CRY2_E7
+
+CRISPR-KO (72h)
+
+G: Control
+I: sgNIPBL
+
+5: Dark
+18: Light 3h
+
+DNA FISH
+Rox 5' MYC TAD (RP11-765K23) + Green 3'MYC TAD (RP11-717D13)
+
+ch1: dapi
+ch2: green
+ch4: rox
+
+
+ 

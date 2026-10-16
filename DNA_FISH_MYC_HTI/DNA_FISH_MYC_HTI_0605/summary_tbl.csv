@@ -1,0 +1,3 @@
+"row","column","light","well_index","dna_dist_mean","dna_dist_median"
+9,19,"MYC_Light","I19",0.255544942907861,0.230442908031631
+9,7,"MYC_Dark","I7",0.356505246860208,0.315682132678055

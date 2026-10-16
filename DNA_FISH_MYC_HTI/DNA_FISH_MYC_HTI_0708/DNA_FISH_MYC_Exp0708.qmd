@@ -1,0 +1,245 @@
+---
+title: "DNA FISH spot distance analysis"
+output: html_document
+---
+
+```{r}
+#| label: load-packages
+#| include: false
+#| warning: false
+
+library(tidyverse)
+library(fs)
+library(data.table)
+library(ggthemes)
+library(SpatialTools)
+```
+
+---
+
+### Input parameters
+
+```{r input-variables}
+GLOB_C <- "*nuclei_information_well*" 
+GLOB_S <- "*spots_locations_well*" 
+XY_RES <- 0.108 #Pixel size in um 
+```
+
+---
+
+### Plate layout and experimental conditions
+
+```{r}
+#| label: read-metadata
+
+light_levs <- c("MYC_Dark","MYC_Light","MYC_sgNipbl_Dark","MYC_sgNipbl_Light") 
+
+plate_layout <- tibble(
+  row = c(7L,7L,9L,9L),
+  column = c(5L,18L,5L,18L),
+  well_index = c("G5","G18","I5","I18"),
+  light = c("MYC_Dark","MYC_Light","MYC_sgNipbl_Dark","MYC_sgNipbl_Light")  
+) %>%
+  mutate(light = factor(light, levels = light_levs))
+```
+
+---
+
+### Download data in data folder if needed
+
+```{r}
+#| label: download
+```
+
+---
+
+### Read cell data
+
+```{r}
+#| label: read-cells
+
+cell_tbl <- dir_info("data", 
+                     recurse = T, 
+                     glob = GLOB_C) %>%
+  filter(size > "1K") %>%
+  rowwise() %>%
+  reframe(fread(path), file_name = as.character(path)) %>%
+  mutate(well_index = paste0(LETTERS[row], column)) %>%
+  select(file_name, column, row, well_index,
+         field_index, time_point, cell_index,
+         area, perimeter, solidity,
+         x = `centroid-0`,
+         y = `centroid-1`) %>%
+  arrange(column, row, field_index,
+          time_point, cell_index) %>%
+  left_join(plate_layout, by = c("well_index", "row", "column"))
+
+cell_tbl <- cell_tbl[!is.na(cell_tbl$light), ]  
+```
+
+---
+
+### Read DNA spot data 
+
+```{r}
+#| label: read-spots
+
+spots_tbl <- dir_info("data", 
+                     recurse = T, 
+                     glob = GLOB_S) %>%
+  filter(size > "1K") %>%
+  rowwise() %>%
+  reframe(fread(path), file_name = as.character(path)) %>%
+  mutate(well_index = paste0(LETTERS[row], column)) %>%
+  select(file_name, column, row, 
+         well_index, field_index, time_point, 
+         cell_index,  channel, spot_index = V1,
+         x = x_location, y = y_location) %>%
+  #conversion from pixels to microns
+  mutate(across(x:y, list(mic = ~ .x * XY_RES))) %>%
+  #filter spots not in the nucleus
+  filter(cell_index != 0) %>%
+  arrange(column, row, field_index,
+          time_point, cell_index, channel) %>%
+  left_join(plate_layout, by = c("well_index", "row", "column"))
+
+spots_tbl <- spots_tbl[!is.na(spots_tbl$light), ]  
+```
+
+---
+
+### Filter cells by size & shape
+
+```{r}
+#| label: cell-filter
+
+cell_filter_tbl <- cell_tbl %>%
+  filter(area >= 50, solidity >= 0.95)
+```
+
+---
+
+### Calculate spot number per cell
+
+```{r}
+#| label: calc-n-spots
+
+cell_n_spots_tbl <- spots_tbl %>%
+  group_by(column, row, well_index, light, field_index,
+           time_point, cell_index, channel) %>%
+  count() %>%
+  pivot_wider(names_from = channel,
+              names_prefix = "n_spots_channel_",
+              values_from = n,
+              values_fill = 0) %>%
+  ungroup()
+```
+
+---
+
+### Filter cells according to spot number per cell
+
+```{r}
+#| label: filter-spots
+
+cell_n_spots_filt_tbl <- cell_n_spots_tbl %>%
+  semi_join(cell_filter_tbl, by = c("row", "column", "well_index", "light", "field_index",
+                             "time_point", "cell_index")) %>%
+  filter(n_spots_channel_2 >= 1 & n_spots_channel_4 == n_spots_channel_2)
+```
+
+---
+
+### Filter spots for filtered cells
+
+```{r}
+#| label: filter-spots-2
+
+spot_filt_tbl <- spots_tbl %>% 
+  semi_join(cell_n_spots_filt_tbl, 
+            by = c("column", "row", "field_index", "light",
+                   "time_point", "cell_index")) %>%
+  as.data.table()
+```
+
+---
+
+### Calculate all same-cell pairwise DNA spot distances
+
+
+```{r}
+#| label: calc-spot-dist
+
+gf_dist_2D <- spot_filt_tbl[channel %in% 2:4,
+                              reshape2::melt(SpatialTools::dist2(as.matrix(.SD[channel == 2,
+                                                       list(x_mic,y_mic)]),
+                                         as.matrix(.SD[channel == 4,
+                                                       list(x_mic,y_mic)])),
+                                   value.name = "dna_dist"),
+                          by = list(row, 
+                                    column,
+                                    well_index,
+                                    light,
+                                    field_index, 
+                                    time_point, 
+                                    cell_index)]
+
+setnames(gf_dist_2D, c("Var1","Var2"), c("g_index","f_index"))
+```
+
+---
+
+### Find minimum pairwise DNA spot distances
+
+```{r}
+#| label: proximity-green-farred
+
+setkey(gf_dist_2D, row, column, well_index,
+       field_index, time_point, cell_index, f_index)
+
+gf_dist_min_2D <- gf_dist_2D[, .SD[which.min(dna_dist),], 
+                        by = key(gf_dist_2D)] %>%
+  left_join(select(cell_tbl, column:well_index, light, field_index:area),
+            by = c("column", "row",
+                   "well_index", "light", "field_index",
+                   "time_point", "cell_index")) %>%
+  filter(dna_dist <= 2)
+```
+
+---
+
+### Well-level summary
+
+```{r}
+#label: distances-summary
+
+well_tbl_gf_dist <- gf_dist_min_2D %>%
+  group_by(well_index, light, row, column) %>%
+  summarise(
+    across(
+      c(dna_dist),
+      list(
+        mean = ~ mean(.x, na.rm = TRUE),
+        median = ~ median(.x, na.rm = TRUE)
+      )
+    ),
+    .groups = "drop"
+  ) %>%
+  select(
+    row, column, light, well_index,
+    dna_dist_mean:dna_dist_median
+  ) %>%
+  arrange(well_index, row, column)
+
+write.csv(well_tbl_gf_dist, "summary_tbl.csv", row.names = FALSE)
+```
+---
+
+### Session info
+
+```{r}
+#| label: session-info
+#| results: markup
+
+sessionInfo()
+```
