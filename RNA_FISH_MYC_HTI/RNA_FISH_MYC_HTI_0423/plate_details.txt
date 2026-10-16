@@ -1,0 +1,17 @@
+RPE MYC cell lines in 384w plate
+
+G: Parental (D10C10)
+H: TetR-CRY2 D3
+I: TetR-CRY2 D10
+J: TetR-CRY2 E10
+
+5,6,7: Dark
+18,19,20: Light (4h)
+
+RNA FISH MYC-exon-Atto647
+
+ch1: dapi
+ch4: atto647
+
+
+
