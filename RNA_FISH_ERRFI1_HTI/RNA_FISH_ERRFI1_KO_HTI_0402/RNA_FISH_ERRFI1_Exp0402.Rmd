@@ -1,0 +1,176 @@
+---
+title: "RNA FISH spot analysis"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+library(tidyverse)
+library(data.table)
+library(fs)
+library(knitr)
+```
+
+---
+
+### Input parameters
+
+```{r input-variables}
+GLOB_C <- "*nuclei_information_well*"
+GLOB_S <- "*spots_locations_well*"
+XY_RES <- 0.108  #Pixel size in um 
+```
+
+---
+
+### Plate layout and experimental conditions
+
+```{r}
+#| label: read-metadata
+
+light_levs <- c("Control_1","Control_2","Control_3","Control_Light_1","Control_Light_2","Control_Light_3","sgRAD21_2","sgRAD21_3","sgRAD21_Light_1","sgRAD21_Light_2","sgRAD21_Light_3","sgNIPBL_2","sgNIPBL_3","sgNIPBL_Light_1","sgNIPBL_Light_2","sgNIPBL_Light_3") 
+
+plate_layout <- tibble(
+  row = c(7L,7L,7L,7L,7L,7L,8L,8L,8L,8L,8L,9L,9L,9L,9L,9L),
+  column = c(5L,6L,7L,18L,19L,20L,6L,7L,18L,19L,20L,6L,7L,18L,19L,20L),
+  well_index = c("G5","G6","G7","G18","G19","G20","H6","H7","H18","H19","H20","I6","I7","I18","I19","I20"),
+  light = c("Control_1","Control_2","Control_3","Control_Light_1","Control_Light_2","Control_Light_3","sgRAD21_2","sgRAD21_3","sgRAD21_Light_1","sgRAD21_Light_2","sgRAD21_Light_3","sgNIPBL_2","sgNIPBL_3","sgNIPBL_Light_1","sgNIPBL_Light_2","sgNIPBL_Light_3") 
+) %>%
+  mutate(light = factor(light, levels = light_levs))
+
+```
+
+---
+
+### Download data in data folder if needed
+
+```{r}
+#| label: download
+```
+
+---
+
+### Read cell data
+
+```{r read-cells}
+cell_tbl <- dir_info("data", recurse = TRUE, glob = GLOB_C) %>%
+  filter(size > "1K") %>%
+  rowwise() %>%
+  reframe(fread(path), file_name = as.character(path)) %>%
+  mutate(well_index = paste0(LETTERS[row], column)) %>%
+  select(file_name, column, row, well_index,
+         field_index, time_point, cell_index,
+         area, solidity) %>%
+  left_join(plate_layout, by = c("well_index", "row", "column")) %>%
+  filter(!is.na(light))
+```
+
+---
+
+### Filter cells by size & shape
+
+```{r filter-cells}
+cell_filter_tbl <- cell_tbl %>%
+  filter(area >= 50, solidity >= 0.95)
+```
+
+---
+
+### Read RNA spot data 
+
+```{r read-spots}
+spots_tbl <- dir_info("data", recurse = TRUE, glob = GLOB_S) %>%
+  filter(size > "1K") %>%
+  rowwise() %>%
+  reframe(fread(path), file_name = as.character(path)) %>%
+  mutate(well_index = paste0(LETTERS[row], column)) %>%
+  select(file_name, column, row, well_index,
+         field_index, time_point, cell_index,
+         channel, integrated_intensity) %>%
+  filter(cell_index != 0, channel == 4) %>%
+  left_join(plate_layout, by = c("well_index", "row", "column")) %>%
+  filter(!is.na(light))
+```
+
+---
+
+### Filter RNA spots for filtered cells
+
+```{r filter-spots}
+
+filtered_spots_tbl <- spots_tbl %>%
+  semi_join(cell_filter_tbl %>% select(well_index, column, row,
+                                       field_index, time_point, cell_index),
+            by = c("well_index", "column", "row",
+                   "field_index", "time_point", "cell_index"))
+```
+
+---
+
+### Count RNA spots per cell
+
+```{r count-spots}
+# Count spots per cell
+spots_per_cell_tbl <- filtered_spots_tbl %>%
+  group_by(well_index, light, column, row,
+           field_index, time_point, cell_index) %>%
+  summarise(n_spots = n(), .groups = "drop")
+
+# Add 0s for cells with no spots
+all_cells_tbl <- cell_filter_tbl %>%
+  select(well_index, light, column, row,
+         field_index, time_point, cell_index) %>%
+  left_join(spots_per_cell_tbl, 
+            by = c("well_index", "light", "column", "row",
+                   "field_index", "time_point", "cell_index")) %>%
+  mutate(n_spots = replace_na(n_spots, 0))
+
+# Filter out cells with too many spots
+all_cells_tbl <- all_cells_tbl %>%
+  filter(n_spots <= 2)
+```
+
+---
+
+### Summary table
+
+```{r summary-table}
+
+# Well-level summary
+well_tbl <- all_cells_tbl %>%
+  group_by(well_index, light) %>%
+  summarise(
+    n_cells = n(),
+    spots_per_cell = mean(n_spots),
+    burst_fraction = mean(n_spots / 2),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    experimental_condition = sub("_[0-9]+$", "", light)
+  )
+
+# Condition-level summary
+summary_tbl <- well_tbl %>%
+  group_by(experimental_condition) %>%
+  summarise(
+    burst_fraction = mean(burst_fraction),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    norm_burst_fraction = burst_fraction / mean(burst_fraction)
+  )
+
+# Save summary table
+write.csv(summary_tbl, "summary_tbl.csv", row.names = FALSE)
+```
+
+---
+
+### Session info
+
+```{r}
+#| label: session-info
+#| results: markup
+
+sessionInfo()
+```

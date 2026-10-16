@@ -1,0 +1,17 @@
+RPE_ERRFI1_5'TAD/3'TAD cell lines
+
+I: TetR clone B2C6
+J: TetR clone C4E2
+K: TetR-CRY2 clone B6C7
+
+5,6,7: Dark
+18,19,20: Light 4h
+
+I,J,K: RNA FISH ERRFI1-intron-Atto647
+
+ch1 dapi
+ch4 atto647
+
+
+
+
