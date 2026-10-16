@@ -1,0 +1,13 @@
+RPE_ERRFI1_TetR-CRY2_B6C7
+
+G6: Dark
+G19: Light 3h
+
+DNA FISH: Orange 5'ERRFI1_2 (RP11-767K22) + Green-3' ERRFI1 (RP11-366K21)
+
+ch1: dapi
+ch2: green
+ch4: orange
+
+
+ 

@@ -1,0 +1,19 @@
+RPE_ERRFI1_TetRCRY2_B6C7 + CRISPR-KO
+
+G: Control
+H: sgRAD21
+I: sgNIPBL
+
+After 72h:
+6: Dark
+18: Light 3h
+
+DNA FISH:
+Orange 5'ERRFI1_2 (RP11-767K22) + Green-3' ERRFI1 (RP11-366K21)
+
+ch1: dapi
+ch2: green
+ch4: orange
+
+
+ 
